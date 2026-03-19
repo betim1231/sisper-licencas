@@ -5,6 +5,7 @@ import json
 import os
 import requests
 from datetime import datetime
+sys.stdout.reconfigure(line_buffering=True)
 
 app = Flask(__name__)
 
@@ -144,7 +145,7 @@ def webhook():
     chat_id = msg["chat"]["id"]
     texto   = msg.get("text", "").strip()
 
-    print(f"CHAT_ID RECEBIDO: {chat_id}")  # ✅ adiciona isso
+    print(f"CHAT_ID RECEBIDO: {chat_id}", flush=True)  # ✅ adiciona isso
 
     # Salva o chat_id do admin automaticamente
     set_config("admin_chat_id", str(chat_id))
