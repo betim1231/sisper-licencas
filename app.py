@@ -144,9 +144,10 @@ def webhook():
     chat_id = msg["chat"]["id"]
     texto   = msg.get("text", "").strip()
 
+    print(f"CHAT_ID RECEBIDO: {chat_id}")  # ✅ adiciona isso
+
     # Salva o chat_id do admin automaticamente
     set_config("admin_chat_id", str(chat_id))
-
     if texto.startswith("/aprovar"):
         partes = texto.split()
         if len(partes) < 3:
