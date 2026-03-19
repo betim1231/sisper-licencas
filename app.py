@@ -68,6 +68,7 @@ def enviar_telegram(chat_id, mensagem):
         "parse_mode": "HTML"
     })
     print(f"RESPOSTA TELEGRAM: {r.status_code} {r.text}", flush=True)
+
 def gerar_licenca(hd_serial, usuarios):
     dados = f"{hd_serial}:{usuarios}:SISPER"
     return hashlib.sha256(dados.encode()).hexdigest()
@@ -224,10 +225,10 @@ def webhook():
         enviar_telegram(chat_id, (
             "🤖 <b>SISPER — Gerenciador de Licenças</b>\n\n"
             "Comandos disponíveis:\n"
-            "/aprovar <hd_serial> <usuarios> — Aprovar licença\n"
-            "/revogar <hd_serial> — Revogar licença\n"
+            "/aprovar [hd_serial] [usuarios] — Aprovar licença\n"
+            "/revogar [hd_serial] — Revogar licença\n"
             "/listar — Listar todas as licenças\n"
-        ))
+         ))
 
     return "ok"
 init_db()  # ✅ chama sempre, não só quando rodado diretamente
