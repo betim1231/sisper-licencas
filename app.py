@@ -61,12 +61,13 @@ def set_config(chave, valor):
     conn.close()
 
 def enviar_telegram(chat_id, mensagem):
-    requests.post(f"{TELEGRAM_API}/sendMessage", json={
+    print(f"ENVIANDO TELEGRAM para {chat_id}: {mensagem[:50]}", flush=True)
+    r = requests.post(f"{TELEGRAM_API}/sendMessage", json={
         "chat_id": chat_id,
         "text": mensagem,
         "parse_mode": "HTML"
     })
-
+    print(f"RESPOSTA TELEGRAM: {r.status_code} {r.text}", flush=True)
 def gerar_licenca(hd_serial, usuarios):
     dados = f"{hd_serial}:{usuarios}:SISPER"
     return hashlib.sha256(dados.encode()).hexdigest()
