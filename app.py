@@ -5,8 +5,9 @@ import json
 import os
 import sys
 import requests
+import functools
 from datetime import datetime
-sys.stdout.reconfigure(line_buffering=True)
+print = functools.partial(print, flush=True)
 
 app = Flask(__name__)
 
