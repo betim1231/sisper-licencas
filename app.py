@@ -152,10 +152,15 @@ def webhook():
     chat_id = msg["chat"]["id"]
     texto   = msg.get("text", "").strip()
 
-    print(f"CHAT_ID RECEBIDO: {chat_id}", flush=True)  # ✅ adiciona isso
+    print(f"CHAT_ID: {chat_id} | TEXTO: {texto}", flush=True)
 
-    # Salva o chat_id do admin automaticamente
-    set_config("admin_chat_id", str(chat_id))
+    # ✅ Verifica se é o admin
+    admin_chat_id = os.environ.get("ADMIN_CHAT_ID", str(chat_id))
+
+    if str(chat_id) != str(admin_chat_id):
+        enviar_telegram(chat_id, "⛔ Acesso não autorizado.")
+        return "ok"
+
     if texto.startswith("/aprovar"):
         partes = texto.split()
         if len(partes) < 3:
@@ -208,13 +213,13 @@ def webhook():
         if not rows:
             enviar_telegram(chat_id, "Nenhuma licença cadastrada.")
         else:
-            msg = "📋 <b>Licenças cadastradas:</b>\n\n"
+            mensagem = "📋 <b>Licenças cadastradas:</b>\n\n"
             for row in rows:
                 emoji = "✅" if row[3] == "ATIVA" else "⏳" if row[3] == "PENDENTE" else "🚫"
-                msg += f"{emoji} <b>{row[0]}</b>\n💾 {row[1]}\n👥 {row[2]} usuários\n\n"
-            enviar_telegram(chat_id, msg)
+                mensagem += f"{emoji} <b>{row[0]}</b>\n💾 {row[1]}\n👥 {row[2]} usuários\n\n"
+            enviar_telegram(chat_id, mensagem)
 
-    elif texto == "/start" or texto == "/help":
+    elif texto in ["/start", "/help"]:
         enviar_telegram(chat_id, (
             "🤖 <b>SISPER — Gerenciador de Licenças</b>\n\n"
             "Comandos disponíveis:\n"
@@ -224,7 +229,6 @@ def webhook():
         ))
 
     return "ok"
-
 init_db()  # ✅ chama sempre, não só quando rodado diretamente
 
 if __name__ == "__main__":
