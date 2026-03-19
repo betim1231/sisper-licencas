@@ -156,7 +156,7 @@ def webhook():
 
     # ✅ Verifica se é o admin
     admin_chat_id = os.environ.get("ADMIN_CHAT_ID", str(chat_id))
-
+        print(f"ADMIN_CHAT_ID ENV: '{admin_chat_id}' | CHAT_ID: '{str(chat_id)}'", flush=True)
     if str(chat_id) != str(admin_chat_id):
         enviar_telegram(chat_id, "⛔ Acesso não autorizado.")
         return "ok"
