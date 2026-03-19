@@ -3,6 +3,7 @@ import sqlite3
 import hashlib
 import json
 import os
+import sys
 import requests
 from datetime import datetime
 sys.stdout.reconfigure(line_buffering=True)
