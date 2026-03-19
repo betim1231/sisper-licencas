@@ -37,6 +37,11 @@ def init_db():
             valor TEXT
         )
     """)
+    # ✅ Salva chat_id do admin via variável de ambiente
+    admin_chat_id = os.environ.get("ADMIN_CHAT_ID")
+    if admin_chat_id:
+        c.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES (?, ?)",
+                  ("admin_chat_id", admin_chat_id))
     conn.commit()
     conn.close()
 
