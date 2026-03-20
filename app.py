@@ -21,16 +21,17 @@ def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("""
-        CREATE TABLE IF NOT EXISTS licencas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            hd_serial TEXT UNIQUE,
-            empresa TEXT,
-            usuarios INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'PENDENTE',
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            aprovado_em DATETIME
-        )
-    """)
+    CREATE TABLE IF NOT EXISTS licencas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        hd_serial TEXT UNIQUE,
+        empresa TEXT,
+        usuarios INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'PENDENTE',
+        criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+        aprovado_em DATETIME,
+        dias_revalidar INTEGER DEFAULT 30
+    )
+""")
     c.execute("""
         CREATE TABLE IF NOT EXISTS config (
             chave TEXT PRIMARY KEY,
@@ -93,8 +94,11 @@ def registrar():
         usuarios = row[1]
         conn.close()
         if status == "ATIVA":
-            licenca = gerar_licenca(hd_serial, usuarios)
-            return jsonify({"ok": True, "status": "ATIVA", "usuarios": usuarios, "licenca": licenca})
+    licenca = gerar_licenca(hd_serial, usuarios)
+    c.execute("SELECT dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
+    row_dias = c.fetchone()
+    dias_revalidar = row_dias[0] if row_dias and row_dias[0] else 30
+    return jsonify({"ok": True, "status": "ATIVA", "usuarios": usuarios, "licenca": licenca, "dias_revalidar": dias_revalidar})
         else:
             return jsonify({"ok": False, "status": status})
 
@@ -142,7 +146,10 @@ def validar():
     if licenca != licenca_esperada:
         return jsonify({"ok": False})
 
-    return jsonify({"ok": True, "usuarios": usuarios})
+    c.execute("SELECT dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
+row_dias = c.fetchone()
+dias_revalidar = row_dias[0] if row_dias and row_dias[0] else 30
+return jsonify({"ok": True, "usuarios": usuarios, "dias_revalidar": dias_revalidar})
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -227,8 +234,33 @@ def webhook():
             "Comandos disponíveis:\n"
             "/aprovar [hd_serial] [usuarios] — Aprovar licença\n"
             "/revogar [hd_serial] — Revogar licença\n"
+            "/prazo [hd_serial] [dias] — Alterar prazo de revalidação\n"
             "/listar — Listar todas as licenças\n"
          ))
+    elif texto.startswith("/prazo"):
+    partes = texto.split()
+    if len(partes) < 3:
+        enviar_telegram(chat_id, "❌ Uso: /prazo [hd_serial] [dias]")
+        return "ok"
+
+    hd_serial = partes[1]
+    try:
+        dias = int(partes[2])
+    except:
+        enviar_telegram(chat_id, "❌ Número de dias inválido")
+        return "ok"
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("UPDATE licencas SET dias_revalidar = ? WHERE hd_serial = ?", (dias, hd_serial))
+    afetado = conn.total_changes
+    conn.commit()
+    conn.close()
+
+    if afetado:
+        enviar_telegram(chat_id, f"✅ Prazo atualizado!\n💾 HD: {hd_serial}\n📅 Dias: {dias}")
+    else:
+        enviar_telegram(chat_id, f"❌ HD serial não encontrado: {hd_serial}")   
 
     return "ok"
 init_db()  # ✅ chama sempre, não só quando rodado diretamente
