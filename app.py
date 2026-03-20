@@ -13,7 +13,6 @@ app = Flask(__name__)
 
 BOT_TOKEN = "8739879398:AAHqr2kXTAEySZ3D8O6hEvsnIXYOMpwBAIU"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-SEU_CHAT_ID = None  # será preenchido automaticamente
 
 DB = "licencas.db"
 
@@ -21,24 +20,23 @@ def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     c.execute("""
-    CREATE TABLE IF NOT EXISTS licencas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        hd_serial TEXT UNIQUE,
-        empresa TEXT,
-        usuarios INTEGER DEFAULT 1,
-        status TEXT DEFAULT 'PENDENTE',
-        criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-        aprovado_em DATETIME,
-        dias_revalidar INTEGER DEFAULT 30
-    )
-""")
+        CREATE TABLE IF NOT EXISTS licencas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            hd_serial TEXT UNIQUE,
+            empresa TEXT,
+            usuarios INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'PENDENTE',
+            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+            aprovado_em DATETIME,
+            dias_revalidar INTEGER DEFAULT 30
+        )
+    """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS config (
             chave TEXT PRIMARY KEY,
             valor TEXT
         )
     """)
-    # ✅ Salva chat_id do admin via variável de ambiente
     admin_chat_id = os.environ.get("ADMIN_CHAT_ID")
     if admin_chat_id:
         c.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES (?, ?)",
@@ -53,13 +51,6 @@ def get_config(chave):
     row = c.fetchone()
     conn.close()
     return row[0] if row else None
-
-def set_config(chave, valor):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES (?, ?)", (chave, valor))
-    conn.commit()
-    conn.close()
 
 def enviar_telegram(chat_id, mensagem):
     print(f"ENVIANDO TELEGRAM para {chat_id}: {mensagem[:50]}", flush=True)
@@ -86,23 +77,26 @@ def registrar():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
 
-    c.execute("SELECT status, usuarios FROM licencas WHERE hd_serial = ?", (hd_serial,))
+    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
     row = c.fetchone()
 
     if row:
-        status   = row[0]
-        usuarios = row[1]
+        status         = row[0]
+        usuarios       = row[1]
+        dias_revalidar = row[2] if row[2] else 30
         conn.close()
         if status == "ATIVA":
-    licenca = gerar_licenca(hd_serial, usuarios)
-    c.execute("SELECT dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
-    row_dias = c.fetchone()
-    dias_revalidar = row_dias[0] if row_dias and row_dias[0] else 30
-    return jsonify({"ok": True, "status": "ATIVA", "usuarios": usuarios, "licenca": licenca, "dias_revalidar": dias_revalidar})
+            licenca = gerar_licenca(hd_serial, usuarios)
+            return jsonify({
+                "ok": True,
+                "status": "ATIVA",
+                "usuarios": usuarios,
+                "licenca": licenca,
+                "dias_revalidar": dias_revalidar
+            })
         else:
             return jsonify({"ok": False, "status": status})
 
-    # Novo registro
     c.execute("""
         INSERT INTO licencas (hd_serial, empresa, status)
         VALUES (?, ?, 'PENDENTE')
@@ -110,7 +104,6 @@ def registrar():
     conn.commit()
     conn.close()
 
-    # Notifica no Telegram
     chat_id = get_config("admin_chat_id")
     if chat_id:
         mensagem = (
@@ -133,23 +126,21 @@ def validar():
 
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    c.execute("SELECT status, usuarios FROM licencas WHERE hd_serial = ?", (hd_serial,))
+    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
     row = c.fetchone()
     conn.close()
 
     if not row or row[0] != "ATIVA":
         return jsonify({"ok": False})
 
-    usuarios = row[1]
+    usuarios       = row[1]
+    dias_revalidar = row[2] if row[2] else 30
     licenca_esperada = gerar_licenca(hd_serial, usuarios)
 
     if licenca != licenca_esperada:
         return jsonify({"ok": False})
 
-    c.execute("SELECT dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
-row_dias = c.fetchone()
-dias_revalidar = row_dias[0] if row_dias and row_dias[0] else 30
-return jsonify({"ok": True, "usuarios": usuarios, "dias_revalidar": dias_revalidar})
+    return jsonify({"ok": True, "usuarios": usuarios, "dias_revalidar": dias_revalidar})
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -163,9 +154,9 @@ def webhook():
 
     print(f"CHAT_ID: {chat_id} | TEXTO: {texto}", flush=True)
 
-    # ✅ Verifica se é o admin
     admin_chat_id = os.environ.get("ADMIN_CHAT_ID", str(chat_id))
     print(f"ADMIN_CHAT_ID ENV: '{admin_chat_id}' | CHAT_ID: '{str(chat_id)}'", flush=True)
+
     if str(chat_id) != str(admin_chat_id):
         enviar_telegram(chat_id, "⛔ Acesso não autorizado.")
         return "ok"
@@ -173,16 +164,14 @@ def webhook():
     if texto.startswith("/aprovar"):
         partes = texto.split()
         if len(partes) < 3:
-            enviar_telegram(chat_id, "❌ Uso: /aprovar <hd_serial> <num_usuarios>")
+            enviar_telegram(chat_id, "❌ Uso: /aprovar [hd_serial] [num_usuarios]")
             return "ok"
-
         hd_serial = partes[1]
         try:
             usuarios = int(partes[2])
         except:
             enviar_telegram(chat_id, "❌ Número de usuários inválido")
             return "ok"
-
         conn = sqlite3.connect(DB)
         c = conn.cursor()
         c.execute("""
@@ -192,7 +181,6 @@ def webhook():
         afetado = conn.total_changes
         conn.commit()
         conn.close()
-
         if afetado:
             enviar_telegram(chat_id, f"✅ Licença aprovada!\n💾 HD: {hd_serial}\n👥 Usuários: {usuarios}")
         else:
@@ -201,9 +189,8 @@ def webhook():
     elif texto.startswith("/revogar"):
         partes = texto.split()
         if len(partes) < 2:
-            enviar_telegram(chat_id, "❌ Uso: /revogar <hd_serial>")
+            enviar_telegram(chat_id, "❌ Uso: /revogar [hd_serial]")
             return "ok"
-
         hd_serial = partes[1]
         conn = sqlite3.connect(DB)
         c = conn.cursor()
@@ -212,20 +199,41 @@ def webhook():
         conn.close()
         enviar_telegram(chat_id, f"🚫 Licença revogada: {hd_serial}")
 
+    elif texto.startswith("/prazo"):
+        partes = texto.split()
+        if len(partes) < 3:
+            enviar_telegram(chat_id, "❌ Uso: /prazo [hd_serial] [dias]")
+            return "ok"
+        hd_serial = partes[1]
+        try:
+            dias = int(partes[2])
+        except:
+            enviar_telegram(chat_id, "❌ Número de dias inválido")
+            return "ok"
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        c.execute("UPDATE licencas SET dias_revalidar = ? WHERE hd_serial = ?", (dias, hd_serial))
+        afetado = conn.total_changes
+        conn.commit()
+        conn.close()
+        if afetado:
+            enviar_telegram(chat_id, f"✅ Prazo atualizado!\n💾 HD: {hd_serial}\n📅 Dias: {dias}")
+        else:
+            enviar_telegram(chat_id, f"❌ HD serial não encontrado: {hd_serial}")
+
     elif texto.startswith("/listar"):
         conn = sqlite3.connect(DB)
         c = conn.cursor()
-        c.execute("SELECT empresa, hd_serial, usuarios, status FROM licencas ORDER BY criado_em DESC")
+        c.execute("SELECT empresa, hd_serial, usuarios, status, dias_revalidar FROM licencas ORDER BY criado_em DESC")
         rows = c.fetchall()
         conn.close()
-
         if not rows:
             enviar_telegram(chat_id, "Nenhuma licença cadastrada.")
         else:
             mensagem = "📋 <b>Licenças cadastradas:</b>\n\n"
             for row in rows:
                 emoji = "✅" if row[3] == "ATIVA" else "⏳" if row[3] == "PENDENTE" else "🚫"
-                mensagem += f"{emoji} <b>{row[0]}</b>\n💾 {row[1]}\n👥 {row[2]} usuários\n\n"
+                mensagem += f"{emoji} <b>{row[0]}</b>\n💾 {row[1]}\n👥 {row[2]} usuários\n📅 Prazo: {row[4]} dias\n\n"
             enviar_telegram(chat_id, mensagem)
 
     elif texto in ["/start", "/help"]:
@@ -236,34 +244,11 @@ def webhook():
             "/revogar [hd_serial] — Revogar licença\n"
             "/prazo [hd_serial] [dias] — Alterar prazo de revalidação\n"
             "/listar — Listar todas as licenças\n"
-         ))
-    elif texto.startswith("/prazo"):
-    partes = texto.split()
-    if len(partes) < 3:
-        enviar_telegram(chat_id, "❌ Uso: /prazo [hd_serial] [dias]")
-        return "ok"
-
-    hd_serial = partes[1]
-    try:
-        dias = int(partes[2])
-    except:
-        enviar_telegram(chat_id, "❌ Número de dias inválido")
-        return "ok"
-
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("UPDATE licencas SET dias_revalidar = ? WHERE hd_serial = ?", (dias, hd_serial))
-    afetado = conn.total_changes
-    conn.commit()
-    conn.close()
-
-    if afetado:
-        enviar_telegram(chat_id, f"✅ Prazo atualizado!\n💾 HD: {hd_serial}\n📅 Dias: {dias}")
-    else:
-        enviar_telegram(chat_id, f"❌ HD serial não encontrado: {hd_serial}")   
+        ))
 
     return "ok"
-init_db()  # ✅ chama sempre, não só quando rodado diretamente
+
+init_db()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
