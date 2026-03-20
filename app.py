@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify
-import sqlite3
 import hashlib
 import json
 import os
@@ -7,27 +6,31 @@ import sys
 import requests
 import functools
 from datetime import datetime
+import psycopg2
+from psycopg2.extras import RealDictCursor
 print = functools.partial(print, flush=True)
 
 app = Flask(__name__)
 
 BOT_TOKEN = "8739879398:AAHqr2kXTAEySZ3D8O6hEvsnIXYOMpwBAIU"
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
-DB = "licencas.db"
+def get_conn():
+    return psycopg2.connect(DATABASE_URL)
 
 def init_db():
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS licencas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             hd_serial TEXT UNIQUE,
             empresa TEXT,
             usuarios INTEGER DEFAULT 1,
             status TEXT DEFAULT 'PENDENTE',
-            criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
-            aprovado_em DATETIME,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            aprovado_em TIMESTAMP,
             dias_revalidar INTEGER DEFAULT 30
         )
     """)
@@ -39,15 +42,15 @@ def init_db():
     """)
     admin_chat_id = os.environ.get("ADMIN_CHAT_ID")
     if admin_chat_id:
-        c.execute("INSERT OR REPLACE INTO config (chave, valor) VALUES (?, ?)",
-                  ("admin_chat_id", admin_chat_id))
+        c.execute("INSERT INTO config (chave, valor) VALUES (%s, %s) ON CONFLICT (chave) DO UPDATE SET valor = %s",
+                  ("admin_chat_id", admin_chat_id, admin_chat_id))
     conn.commit()
     conn.close()
 
 def get_config(chave):
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT valor FROM config WHERE chave = ?", (chave,))
+    c.execute("SELECT valor FROM config WHERE chave = %s", (chave,))
     row = c.fetchone()
     conn.close()
     return row[0] if row else None
@@ -74,10 +77,10 @@ def registrar():
     if not hd_serial:
         return jsonify({"ok": False, "erro": "HD serial não informado"}), 400
 
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
 
-    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
+    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = %s", (hd_serial,))
     row = c.fetchone()
 
     if row:
@@ -99,7 +102,7 @@ def registrar():
 
     c.execute("""
         INSERT INTO licencas (hd_serial, empresa, status)
-        VALUES (?, ?, 'PENDENTE')
+        VALUES (%s, %s, 'PENDENTE')
     """, (hd_serial, empresa))
     conn.commit()
     conn.close()
@@ -124,9 +127,9 @@ def validar():
     hd_serial = data.get("hd_serial")
     licenca   = data.get("licenca")
 
-    conn = sqlite3.connect(DB)
+    conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = ?", (hd_serial,))
+    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = %s", (hd_serial,))
     row = c.fetchone()
     conn.close()
 
@@ -172,13 +175,13 @@ def webhook():
         except:
             enviar_telegram(chat_id, "❌ Número de usuários inválido")
             return "ok"
-        conn = sqlite3.connect(DB)
+        conn = get_conn()
         c = conn.cursor()
         c.execute("""
-            UPDATE licencas SET status = 'ATIVA', usuarios = ?, aprovado_em = ?
-            WHERE hd_serial = ?
+            UPDATE licencas SET status = 'ATIVA', usuarios = %s, aprovado_em = %s
+            WHERE hd_serial = %s
         """, (usuarios, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), hd_serial))
-        afetado = conn.total_changes
+        afetado = c.rowcount
         conn.commit()
         conn.close()
         if afetado:
@@ -192,9 +195,9 @@ def webhook():
             enviar_telegram(chat_id, "❌ Uso: /revogar [hd_serial]")
             return "ok"
         hd_serial = partes[1]
-        conn = sqlite3.connect(DB)
+        conn = get_conn()
         c = conn.cursor()
-        c.execute("UPDATE licencas SET status = 'REVOGADA' WHERE hd_serial = ?", (hd_serial,))
+        c.execute("UPDATE licencas SET status = 'REVOGADA' WHERE hd_serial = %s", (hd_serial,))
         conn.commit()
         conn.close()
         enviar_telegram(chat_id, f"🚫 Licença revogada: {hd_serial}")
@@ -210,10 +213,10 @@ def webhook():
         except:
             enviar_telegram(chat_id, "❌ Número de dias inválido")
             return "ok"
-        conn = sqlite3.connect(DB)
+        conn = get_conn()
         c = conn.cursor()
-        c.execute("UPDATE licencas SET dias_revalidar = ? WHERE hd_serial = ?", (dias, hd_serial))
-        afetado = conn.total_changes
+        c.execute("UPDATE licencas SET dias_revalidar = %s WHERE hd_serial = %s", (dias, hd_serial))
+        afetado = c.rowcount
         conn.commit()
         conn.close()
         if afetado:
@@ -222,7 +225,7 @@ def webhook():
             enviar_telegram(chat_id, f"❌ HD serial não encontrado: {hd_serial}")
 
     elif texto.startswith("/listar"):
-        conn = sqlite3.connect(DB)
+        conn = get_conn()
         c = conn.cursor()
         c.execute("SELECT empresa, hd_serial, usuarios, status, dias_revalidar FROM licencas ORDER BY criado_em DESC")
         rows = c.fetchall()
