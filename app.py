@@ -7,7 +7,6 @@ import requests
 import functools
 from datetime import datetime
 import psycopg2
-from psycopg2.extras import RealDictCursor
 print = functools.partial(print, flush=True)
 
 app = Flask(__name__)
@@ -31,7 +30,8 @@ def init_db():
             status TEXT DEFAULT 'PENDENTE',
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             aprovado_em TIMESTAMP,
-            dias_revalidar INTEGER DEFAULT 30
+            dias_revalidar INTEGER DEFAULT 30,
+            expiracao DATE
         )
     """)
     c.execute("""
@@ -80,13 +80,14 @@ def registrar():
     conn = get_conn()
     c = conn.cursor()
 
-    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = %s", (hd_serial,))
+    c.execute("SELECT status, usuarios, dias_revalidar, expiracao FROM licencas WHERE hd_serial = %s", (hd_serial,))
     row = c.fetchone()
 
     if row:
         status         = row[0]
         usuarios       = row[1]
         dias_revalidar = row[2] if row[2] else 30
+        expiracao      = str(row[3]) if row[3] else None
         conn.close()
         if status == "ATIVA":
             licenca = gerar_licenca(hd_serial, usuarios)
@@ -95,7 +96,8 @@ def registrar():
                 "status": "ATIVA",
                 "usuarios": usuarios,
                 "licenca": licenca,
-                "dias_revalidar": dias_revalidar
+                "dias_revalidar": dias_revalidar,
+                "expiracao": expiracao
             })
         else:
             return jsonify({"ok": False, "status": status})
@@ -129,7 +131,7 @@ def validar():
 
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT status, usuarios, dias_revalidar FROM licencas WHERE hd_serial = %s", (hd_serial,))
+    c.execute("SELECT status, usuarios, dias_revalidar, expiracao FROM licencas WHERE hd_serial = %s", (hd_serial,))
     row = c.fetchone()
     conn.close()
 
@@ -138,12 +140,13 @@ def validar():
 
     usuarios       = row[1]
     dias_revalidar = row[2] if row[2] else 30
+    expiracao      = str(row[3]) if row[3] else None
     licenca_esperada = gerar_licenca(hd_serial, usuarios)
 
     if licenca != licenca_esperada:
         return jsonify({"ok": False})
 
-    return jsonify({"ok": True, "usuarios": usuarios, "dias_revalidar": dias_revalidar})
+    return jsonify({"ok": True, "usuarios": usuarios, "dias_revalidar": dias_revalidar, "expiracao": expiracao})
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -224,10 +227,37 @@ def webhook():
         else:
             enviar_telegram(chat_id, f"❌ HD serial não encontrado: {hd_serial}")
 
+    elif texto.startswith("/expiracao"):
+        partes = texto.split()
+        if len(partes) < 4:
+            enviar_telegram(chat_id, "❌ Uso: /expiracao [hd_serial] [data] [usuarios]\nEx: /expiracao abc123 2026-12-31 2")
+            return "ok"
+        hd_serial = partes[1]
+        data_exp  = partes[2]
+        try:
+            usuarios = int(partes[3])
+            datetime.strptime(data_exp, "%Y-%m-%d")
+        except:
+            enviar_telegram(chat_id, "❌ Data inválida! Use o formato: AAAA-MM-DD\nEx: 2026-12-31")
+            return "ok"
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("""
+            UPDATE licencas SET status = 'ATIVA', usuarios = %s, expiracao = %s, aprovado_em = %s
+            WHERE hd_serial = %s
+        """, (usuarios, data_exp, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), hd_serial))
+        afetado = c.rowcount
+        conn.commit()
+        conn.close()
+        if afetado:
+            enviar_telegram(chat_id, f"✅ Licença atualizada!\n💾 HD: {hd_serial}\n👥 Usuários: {usuarios}\n📅 Expira em: {data_exp}")
+        else:
+            enviar_telegram(chat_id, f"❌ HD serial não encontrado: {hd_serial}")
+
     elif texto.startswith("/listar"):
         conn = get_conn()
         c = conn.cursor()
-        c.execute("SELECT empresa, hd_serial, usuarios, status, dias_revalidar FROM licencas ORDER BY criado_em DESC")
+        c.execute("SELECT empresa, hd_serial, usuarios, status, dias_revalidar, expiracao FROM licencas ORDER BY criado_em DESC")
         rows = c.fetchall()
         conn.close()
         if not rows:
@@ -236,7 +266,8 @@ def webhook():
             mensagem = "📋 <b>Licenças cadastradas:</b>\n\n"
             for row in rows:
                 emoji = "✅" if row[3] == "ATIVA" else "⏳" if row[3] == "PENDENTE" else "🚫"
-                mensagem += f"{emoji} <b>{row[0]}</b>\n💾 {row[1]}\n👥 {row[2]} usuários\n📅 Prazo: {row[4]} dias\n\n"
+                exp = f"\n📅 Expira: {row[5]}" if row[5] else f"\n📅 Prazo: {row[4]} dias"
+                mensagem += f"{emoji} <b>{row[0]}</b>\n💾 {row[1]}\n👥 {row[2]} usuários{exp}\n\n"
             enviar_telegram(chat_id, mensagem)
 
     elif texto in ["/start", "/help"]:
@@ -246,6 +277,7 @@ def webhook():
             "/aprovar [hd_serial] [usuarios] — Aprovar licença\n"
             "/revogar [hd_serial] — Revogar licença\n"
             "/prazo [hd_serial] [dias] — Alterar prazo de revalidação\n"
+            "/expiracao [hd_serial] [data] [usuarios] — Definir data de expiração\n"
             "/listar — Listar todas as licenças\n"
         ))
 
