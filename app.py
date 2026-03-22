@@ -47,6 +47,13 @@ def init_db():
     conn.commit()
     conn.close()
 
+    # ✅ Adiciona coluna expiracao se não existir
+    try:
+        c.execute("ALTER TABLE licencas ADD COLUMN expiracao DATE")
+        conn.commit()
+    except:
+        pass
+
 def get_config(chave):
     conn = get_conn()
     c = conn.cursor()
