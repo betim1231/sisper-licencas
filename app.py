@@ -75,6 +75,19 @@ def gerar_licenca(hd_serial, usuarios):
     dados = f"{hd_serial}:{usuarios}:SISPER"
     return hashlib.sha256(dados.encode()).hexdigest()
 
+@app.route("/sync_config")
+def sync_config():
+    admin_chat_id = os.environ.get("ADMIN_CHAT_ID")
+    if not admin_chat_id:
+        return "ADMIN_CHAT_ID não encontrado no ambiente"
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO config (chave, valor) VALUES (%s, %s) ON CONFLICT (chave) DO UPDATE SET valor = %s",
+              ("admin_chat_id", admin_chat_id, admin_chat_id))
+    conn.commit()
+    conn.close()
+    return f"✅ admin_chat_id salvo: {admin_chat_id}"
+
 @app.route("/registrar", methods=["POST"])
 def registrar():
     data = request.json
