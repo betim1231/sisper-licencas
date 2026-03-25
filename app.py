@@ -251,6 +251,19 @@ def webhook():
         conn.close()
         enviar_telegram(chat_id, f"🚫 Licença revogada: {hd_serial}")
 
+    elif texto.startswith("/pendente"):
+        partes = texto.split()
+        if len(partes) < 2:
+            enviar_telegram(chat_id, "❌ Uso: /pendente [hd_serial]")
+            return "ok"
+        hd_serial = partes[1]
+        conn = get_conn()
+        c = conn.cursor()
+        c.execute("UPDATE licencas SET status = 'PENDENTE' WHERE hd_serial = %s", (hd_serial,))
+        conn.commit()
+        conn.close()
+        enviar_telegram(chat_id, f"⏳ Licença colocada como PENDENTE: {hd_serial}")
+
     elif texto.startswith("/prazo"):
         partes = texto.split()
         if len(partes) < 3:
