@@ -75,18 +75,6 @@ def gerar_licenca(hd_serial, usuarios):
     dados = f"{hd_serial}:{usuarios}:SISPER"
     return hashlib.sha256(dados.encode()).hexdigest()
 
-@app.route("/sync_config")
-def sync_config():
-    admin_chat_id = os.environ.get("ADMIN_CHAT_ID")
-    if not admin_chat_id:
-        return "ADMIN_CHAT_ID não encontrado no ambiente"
-    conn = get_conn()
-    c = conn.cursor()
-    c.execute("INSERT INTO config (chave, valor) VALUES (%s, %s) ON CONFLICT (chave) DO UPDATE SET valor = %s",
-              ("admin_chat_id", admin_chat_id, admin_chat_id))
-    conn.commit()
-    conn.close()
-    return f"✅ admin_chat_id salvo: {admin_chat_id}"
 
 @app.route("/registrar", methods=["POST"])
 def registrar():
@@ -131,13 +119,21 @@ def registrar():
 
     chat_id = get_config("admin_chat_id")
     if chat_id:
+        cnpj = data.get("cnpj", "Não informado")
+        telefone = data.get("telefone", "Não informado")
+        cidade = data.get("cidade", "Não informado")
+        estado = data.get("estado", "Não informado")
         mensagem = (
             f"🆕 <b>Nova solicitação de licença</b>\n\n"
             f"🏢 <b>Empresa:</b> {empresa}\n"
+            f"📄 <b>CNPJ:</b> {cnpj}\n"
+            f"📍 <b>Cidade:</b> {cidade}/{estado}\n"
+            f"📞 <b>Telefone:</b> {telefone}\n"
             f"💾 <b>HD Serial:</b> <code>{hd_serial}</code>\n\n"
-            f"Para aprovar, envie:\n"
-            f"<code>/aprovar {hd_serial} 1</code>\n\n"
-            f"(substitua o número pelo total de usuários)"
+            f"Para aprovar 7 dias de teste:\n"
+            f"<code>/expiracao {hd_serial} {(datetime.now() + __import__('datetime').timedelta(days=7)).strftime('%Y-%m-%d')} 1</code>\n\n"
+            f"Para aprovar licença completa:\n"
+            f"<code>/expiracao {hd_serial} AAAA-MM-DD NUM_USUARIOS</code>"
         )
         enviar_telegram(chat_id, mensagem)
 
