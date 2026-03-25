@@ -155,6 +155,36 @@ def validar():
 
     return jsonify({"ok": True, "usuarios": usuarios, "dias_revalidar": dias_revalidar, "expiracao": expiracao})
 
+@app.route("/renovar", methods=["POST"])
+def renovar():
+    data      = request.json
+    hd_serial = data.get("hd_serial")
+    empresa   = data.get("empresa", "Não informado")
+
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT status, usuarios, expiracao FROM licencas WHERE hd_serial = %s", (hd_serial,))
+    row = c.fetchone()
+    conn.close()
+
+    chat_id = get_config("admin_chat_id")
+    if chat_id:
+        status    = row[0] if row else "NÃO CADASTRADO"
+        usuarios  = row[1] if row else "-"
+        expiracao = str(row[2]) if row and row[2] else "Sem data"
+        mensagem = (
+            f"🔄 <b>Solicitação de Renovação</b>\n\n"
+            f"🏢 <b>Empresa:</b> {empresa}\n"
+            f"💾 <b>HD Serial:</b> <code>{hd_serial}</code>\n"
+            f"👥 <b>Usuários atuais:</b> {usuarios}\n"
+            f"📅 <b>Expiração atual:</b> {expiracao}\n\n"
+            f"Para renovar, envie:\n"
+            f"<code>/expiracao {hd_serial} AAAA-MM-DD {usuarios}</code>"
+        )
+        enviar_telegram(chat_id, mensagem)
+
+    return jsonify({"ok": True})
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
